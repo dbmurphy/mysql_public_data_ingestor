@@ -1,0 +1,24 @@
+plugin_spec:
+  name: opensky
+  config:
+    auth:
+      user: "your_username"
+      pass: "your_password"
+    interval: 60
+    fetch_workers: 1
+
+databases:
+  prefix: "auto_"
+  copies: 3
+  extra:
+    foo:
+      tables: 5
+  write_workers: 5
+
+mysql:
+  user: "your_mysql_username"
+  password: "your_mysql_password"
+  host: "localhost"
+  port: 3306
+  dbname: "your_mysql_dbname"
+  tls: "true"

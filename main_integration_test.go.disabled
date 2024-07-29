@@ -1,0 +1,157 @@
+package mysql_public_data_ingestor
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/mock"
+	"mysql_public_data_ingestor/api_plugins"
+	"mysql_public_data_ingestor/syslogwrapper"
+)
+
+// Mock Plugin struct embedding the real plugin and providing mock implementations for specific methods
+type MockPlugin struct {
+	api_plugins.APIPlugin
+	mock.Mock
+	realPlugin api_plugins.APIPlugin
+}
+
+// Implement FetchData method for MockPlugin
+func (m *MockPlugin) FetchData() (interface{}, error) {
+	args := m.Called()
+	if args.Get(0) != nil {
+		return args.Get(0), args.Error(1)
+	}
+	return generateMockData(m.realPlugin.Schema()), nil
+}
+
+// Implement ValidateConfig method for MockPlugin
+func (m *MockPlugin) ValidateConfig(config json.RawMessage) error {
+	args := m.Called(config)
+	return args.Error(0)
+}
+
+// Implement other methods by delegating to the real plugin
+func (m *MockPlugin) Schema() string {
+	return m.realPlugin.Schema()
+}
+
+func (m *MockPlugin) TablePrefix() string {
+	return m.realPlugin.TablePrefix()
+}
+
+func (m *MockPlugin) Interval() (int, error) {
+	return m.realPlugin.Interval()
+}
+
+func (m *MockPlugin) SetLogger(sysLog syslogwrapper.SyslogWrapperInterface) {
+	m.realPlugin.SetLogger(sysLog)
+}
+
+func (m *MockPlugin) GetFieldNames() []string {
+	return m.realPlugin.GetFieldNames()
+}
+
+func (m *MockPlugin) GetValues(record interface{}) []interface{} {
+	return m.realPlugin.GetValues(record)
+}
+
+func (m *MockPlugin) Name() string {
+	return m.realPlugin.Name()
+}
+
+// Helper function to generate mock data based on schema
+func generateMockData(schema string) []interface{} {
+	data := make(map[string]interface{})
+	for _, field := range strings.Split(schema, ",") {
+		parts := strings.Fields(field)
+		if len(parts) >= 2 {
+			name, typ := parts[0], parts[1]
+			switch typ {
+			case "INT":
+				data[name] = 123456
+			case "VARCHAR":
+				data[name] = "test"
+			case "FLOAT":
+				data[name] = 1.23
+			case "BOOLEAN":
+				data[name] = true
+			case "JSON":
+				data[name] = "{}"
+			default:
+				data[name] = "unknown"
+			}
+		}
+	}
+	return []interface{}{data}
+}
+
+// Integration test function
+func TestMainIntegration(t *testing.T) {
+	// Check if integration test should run
+	if os.Getenv("ACCTEST") != "1" {
+		t.Skip("Skipping integration test as ACCTEST environment variable is not set")
+	}
+
+	// Set TEST_CONFIG_FILE environment variable
+	err := os.Setenv("TEST_CONFIG_FILE", "config-test.yaml")
+	if err != nil {
+		t.Fatalf("Failed to set TEST_CONFIG_FILE environment variable: %v", err)
+	}
+	defer func() {
+		if err := os.Unsetenv("TEST_CONFIG_FILE"); err != nil {
+			t.Errorf("Failed to unset TEST_CONFIG_FILE environment variable: %v", err)
+		}
+	}()
+
+	// Setup syslog
+	sysLog, err := setupSyslog("data_pull")
+	if err != nil {
+		t.Fatalf("Failed to initialize syslog: %v", err)
+	}
+	defer sysLog.Close()
+
+	// Load configuration
+	cfg, err := loadConfig(sysLog)
+	if err != nil {
+		t.Fatalf("Failed to load config file: %v", err)
+	}
+
+	// Load real plugin
+	realPlugin, err := setupPlugins(cfg, sysLog)
+	if err != nil {
+		t.Fatalf("Failed to setup plugins: %v", err)
+	}
+
+	// Create the mock plugin
+	mockPlugin := &MockPlugin{
+		realPlugin: realPlugin,
+	}
+	mockPlugin.On("FetchData").Return(generateMockData(realPlugin.Schema()), nil)
+	mockPlugin.On("ValidateConfig", mock.Anything).Return(nil)
+
+	// Initialize DBManager with the configuration
+	dbManager, err := initializeDatabases(cfg, sysLog, mockPlugin)
+	if err != nil {
+		t.Fatalf("Failed to initialize databases: %v", err)
+	}
+
+	// Create table workers
+	tableChannels, wg := createTableWorkers(dbManager, sysLog, mockPlugin)
+
+	// Start data fetching
+	stop := make(chan struct{})
+	startDataFetching(mockPlugin, tableChannels, sysLog, stop)
+
+	// Run for a specified period and then stop
+	time.Sleep(1 * time.Minute) // Example: run for 1 minute
+	close(stop)
+
+	wg.Wait()
+
+	// Assert that mock expectations were met
+	mockPlugin.AssertExpectations(t)
+}

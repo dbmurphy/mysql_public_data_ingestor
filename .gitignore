@@ -20,3 +20,10 @@
 # Go workspace file
 go.work
 go.work.sum
+
+go.mod
+go.sum
+
+mysql_public_data_ingestor
+
+.idea
