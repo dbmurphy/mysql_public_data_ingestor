@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"mysql_public_data_ingestor/api_plugins"
 	"mysql_public_data_ingestor/syslogwrapper"
 	"os"
+	"sync"
 	"testing"
 )
 
@@ -83,6 +88,27 @@ func (m *MockAPIPlugin) Name() string {
 	return args.String(0)
 }
 
+// MockDBManager is a mock implementation of the DBManager
+type MockDBManager struct {
+	DbPool *sql.DB
+	Mock   sqlmock.Sqlmock
+}
+
+func NewMockDBManager() (*MockDBManager, error) {
+	db, sqlMock, err := sqlmock.New()
+	if err != nil {
+		return nil, err
+	}
+	return &MockDBManager{
+		DbPool: db,
+		Mock:   sqlMock,
+	}, nil
+}
+
+func (m *MockDBManager) Conn(ctx context.Context) (*sql.Conn, error) {
+	return m.DbPool.Conn(ctx)
+}
+
 // Test for FetchAndDistributeData function
 func TestFetchAndDistributeData(t *testing.T) {
 	// Mock Syslog
@@ -108,48 +134,57 @@ func TestFetchAndDistributeData(t *testing.T) {
 }
 
 // Test for TableWorker function
-// TODO: Rework TableWorker, so it can be passed a mockDB object vs making a connection with the DSN maybe using db_manager
-//func TestTableWorker(t *testing.T) {
-//	// Mock Syslog
-//	mockSyslog := new(MockSyslogWrapper)
-//
-//	// Setup mock database connection
-//	db, mockDB, err := sqlmock.New()
-//	if err != nil {
-//		t.Fatalf("Error creating mock DB: %v", err)
-//	}
-//	defer func() {
-//		if err := db.Close(); err != nil {
-//			mockSyslog.Warning(fmt.Sprintf("Failed to close MySQL connection: %v", err))
-//		}
-//	}()
-//
-//	// Mock APIPlugin
-//	mockAPIPlugin := new(MockAPIPlugin)
-//	mockAPIPlugin.On("GetFieldNames").Return([]string{"field1", "field2"})
-//	mockAPIPlugin.On("GetValues", mock.Anything).Return([]interface{}{1, "value"})
-//
-//	// Mock the SQL expectations
-//	mockDB.ExpectExec("INSERT INTO test_db.test_table").WithArgs(1, "value").WillReturnResult(sqlmock.NewResult(1, 1))
-//
-//	// Setup table worker
-//	var wg sync.WaitGroup
-//	batchChan := make(chan []interface{})
-//	wg.Add(1)
-//
-//	go TableWorker("test_db", "test_table", batchChan, &wg, mockSyslog, "test_dsn", mockAPIPlugin)
-//
-//	// Send test data
-//	batchChan <- []interface{}{"record1", "record2"}
-//	close(batchChan)
-//
-//	wg.Wait()
-//
-//	// Check SQL expectations
-//	if err := mockDB.ExpectationsWereMet(); err != nil {
-//		t.Errorf("There were unmet expectations: %v", err)
-//	}
-//}
+func TestTableWorker(t *testing.T) {
+	// Mock Syslog
+	mockSyslog := new(MockSyslogWrapper)
+
+	// Setup mock database manager
+	mockDBManager, err := NewMockDBManager()
+	if err != nil {
+		t.Fatalf("Error creating mock DBManager: %v", err)
+	}
+	defer func() {
+		if err := mockDBManager.DbPool.Close(); err != nil {
+			mockSyslog.Warning(fmt.Sprintf("Failed to close MySQL connection: %v", err))
+		}
+	}()
+
+	// Mock APIPlugin
+	mockAPIPlugin := new(MockAPIPlugin)
+	mockAPIPlugin.On("GetFieldNames").Return([]string{"field1", "field2"})
+	mockAPIPlugin.On("GetValues", mock.Anything).Return([]interface{}{1, "value"})
+
+	// Mock the SQL expectations
+	mockDBManager.Mock.ExpectBegin()
+	query := fmt.Sprintf(
+		"%s %s.%s (%s) VALUES (%s)",
+		"INSERT INTO",
+		"test_db",
+		"test_table",
+		"field1, field2",
+		"?, ?",
+	)
+	mockDBManager.Mock.ExpectExec(query).WithArgs(1, "value").WillReturnResult(sqlmock.NewResult(1, 1))
+	mockDBManager.Mock.ExpectCommit()
+
+	// Setup table worker
+	var wg sync.WaitGroup
+	batchChan := make(chan []interface{})
+	wg.Add(1)
+
+	go TableWorker("test_db", "test_table", batchChan, &wg, mockSyslog, mockDBManager, mockAPIPlugin)
+
+	// Send test data
+	batchChan <- []interface{}{"record1", "record2"}
+	close(batchChan)
+
+	wg.Wait()
+
+	// Check SQL expectations
+	if err := mockDBManager.Mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("There were unmet expectations: %v", err)
+	}
+}
 
 // Test for SetupSyslog function
 func TestSetupSyslog(t *testing.T) {
@@ -191,7 +226,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 }
 
-//// Test for SetupPlugins function
+// Test for SetupPlugins function
 //func TestSetupPlugins(t *testing.T) {
 //	mockSyslog := new(MockSyslogWrapper)
 //	mockSyslog.On("Error", mock.Anything).Return()

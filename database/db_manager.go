@@ -18,11 +18,19 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+type DBManagerInterface interface {
+	Conn(ctx context.Context) (*sql.Conn, error)
+}
+
 type DBManager struct {
 	DSN    string
 	DBs    []string
 	Tables map[string][]string
 	DbPool *sql.DB
+}
+
+func (dbm *DBManager) Conn(ctx context.Context) (*sql.Conn, error) {
+	return dbm.DbPool.Conn(ctx)
 }
 
 // NewDBManager initializes DBManager with the provided MySQL configuration and creates a new connection pool.

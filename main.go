@@ -157,7 +157,7 @@ func FetchAndDistributeData(apiPlugin api_plugins.APIPlugin, tableChannels map[s
 	return nil
 }
 
-func TableWorker(dbName, tableName string, batchChan <-chan []interface{}, wg *sync.WaitGroup, sysLog syslogwrapper.SyslogWrapperInterface, dbManager *database.DBManager, apiPlugin api_plugins.APIPlugin) {
+func TableWorker(dbName, tableName string, batchChan <-chan []interface{}, wg *sync.WaitGroup, sysLog syslogwrapper.SyslogWrapperInterface, dbManager database.DBManagerInterface, apiPlugin api_plugins.APIPlugin) {
 	defer wg.Done()
 
 	fieldNames := apiPlugin.GetFieldNames()
@@ -165,7 +165,7 @@ func TableWorker(dbName, tableName string, batchChan <-chan []interface{}, wg *s
 	placeholderStr := strings.Repeat("?, ", len(fieldNames)-1) + "?"
 
 	// Get a connection from the pool
-	db, err := dbManager.DbPool.Conn(context.Background())
+	db, err := dbManager.Conn(context.Background())
 	if err != nil {
 		sysLog.Warning(fmt.Sprintf("Failed to get connection from pool: %v", err))
 		return
@@ -186,7 +186,13 @@ func TableWorker(dbName, tableName string, batchChan <-chan []interface{}, wg *s
 
 		for _, record := range batch {
 			values := apiPlugin.GetValues(record)
-			query := fmt.Sprintf("%s %s.%s (%s) VALUES (%s)", "INSERT INTO", dbName, tableName, fieldNamesStr, placeholderStr)
+			query := fmt.Sprintf("%s %s.%s (%s) VALUES (%s)",
+				"INSERT INTO",
+				dbName,
+				tableName,
+				fieldNamesStr,
+				placeholderStr,
+			)
 			_, err := tx.Exec(query, values...)
 			if err != nil {
 				sysLog.Warning(fmt.Sprintf("Failed to insert record into %s.%s: %v", dbName, tableName, err))
