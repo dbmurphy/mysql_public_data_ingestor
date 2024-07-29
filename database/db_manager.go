@@ -46,31 +46,15 @@ func NewDBManager(mysqlConfig config.MySQLConfig) *DBManager {
 		log.Fatalf("Failed to connect to MySQL: %v", err)
 	}
 
-	dbManager := &DBManager{
+	// Apply connection pool settings directly
+	conn.SetMaxOpenConns(mysqlConfig.ConnectionPool.MaxOpenConns)
+	conn.SetMaxIdleConns(mysqlConfig.ConnectionPool.MaxIdleConns)
+	conn.SetConnMaxLifetime(time.Duration(mysqlConfig.ConnectionPool.ConnMaxLifetime) * time.Second)
+
+	return &DBManager{
 		DSN:    dsn,
 		DbPool: conn,
 	}
-	dbManager.SetupPoolConfig(mysqlConfig.ConnectionPool)
-
-	return dbManager
-}
-
-// SetupPoolConfig configures the connection pool settings with defaults if not provided.
-func (dbm *DBManager) SetupPoolConfig(poolConfig config.ConnectionPool) {
-	if poolConfig.MaxOpenConns == 0 {
-		poolConfig.MaxOpenConns = 25 // default value
-	}
-	dbm.DbPool.SetMaxOpenConns(poolConfig.MaxOpenConns)
-
-	if poolConfig.MaxIdleConns == 0 {
-		poolConfig.MaxIdleConns = 25 // default value
-	}
-	dbm.DbPool.SetMaxIdleConns(poolConfig.MaxIdleConns)
-
-	if poolConfig.ConnMaxLifetime == 0 {
-		poolConfig.ConnMaxLifetime = 3600 // default value in seconds
-	}
-	dbm.DbPool.SetConnMaxLifetime(time.Duration(poolConfig.ConnMaxLifetime) * time.Second)
 }
 
 func setupTLSConfig(tlsConfig config.TLSConfig) string {
@@ -117,7 +101,7 @@ func setupTLSConfig(tlsConfig config.TLSConfig) string {
 		tlsConfigStruct.CipherSuites = nil // Use default cipher suites
 	}
 	if tlsConfig.ClientAuth != 0 {
-		tlsConfigStruct.ClientAuth = tlsConfig.ClientAuth
+		tlsConfigStruct.ClientAuth = tls.ClientAuthType(tlsConfig.ClientAuth)
 	}
 
 	err := mysql.RegisterTLSConfig("custom", tlsConfigStruct)
