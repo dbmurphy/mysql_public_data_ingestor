@@ -124,12 +124,14 @@ func StartDataFetching(apiPlugin api_plugins.APIPlugin, tableChannels map[string
 }
 
 func FetchAndDistributeData(apiPlugin api_plugins.APIPlugin, tableChannels map[string]chan []interface{}, sysLog syslogwrapper.SyslogWrapperInterface) error {
+	// Fetch data from the API plugin
 	data, err := apiPlugin.FetchData()
 	if err != nil {
 		return err
 	}
 
-	batchData := make([]interface{}, 0)
+	// Convert fetched data to batch data
+	var batchData []interface{}
 	switch d := data.(type) {
 	case api_plugins.Response:
 		for _, record := range d.Records {
@@ -139,8 +141,13 @@ func FetchAndDistributeData(apiPlugin api_plugins.APIPlugin, tableChannels map[s
 		return fmt.Errorf("unsupported data type")
 	}
 
+	// Send the batch data to each channel
 	for _, ch := range tableChannels {
-		ch <- batchData
+		// Send the batch data to the channel
+		// Here we use a goroutine to avoid blocking if the channel might be full
+		go func(ch chan []interface{}) {
+			ch <- batchData
+		}(ch)
 	}
 
 	return nil
