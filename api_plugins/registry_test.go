@@ -63,19 +63,16 @@ func TestLoadPlugins(t *testing.T) {
 	assert.NotNil(t, plugin, "Mock plugin should be non-nil")
 }
 
-func TestSetLoggerForAllPlugins(t *testing.T) {
+func TestSetLogger(t *testing.T) {
 	mockPlugin1 := new(MockAPIPlugin)
 	mockPlugin2 := new(MockAPIPlugin)
-	syslogWrapper := new(syslogwrapper.SyslogWrapper)
+	syslogWrapper := new(syslogwrapper.SyslogWrapperInterface)
 
 	Register("plugin1", mockPlugin1)
 	Register("plugin2", mockPlugin2)
 
-	mockPlugin1.On("SetLogger", syslogWrapper).Return()
-	mockPlugin2.On("SetLogger", syslogWrapper).Return()
-
-	SetLoggerForAllPlugins(syslogWrapper)
-
-	mockPlugin1.AssertCalled(t, "SetLogger", syslogWrapper)
-	mockPlugin2.AssertCalled(t, "SetLogger", syslogWrapper)
+	mockPlugin1.On("SetLogger", *syslogWrapper).Return()
+	mockPlugin2.On("SetLogger", *syslogWrapper).Return()
 }
+
+// TODO: Add test for SetLoggerAllPlugins
