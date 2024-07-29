@@ -1,6 +1,7 @@
-package mysql_public_data_ingestor
+package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -37,6 +38,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize databases: %v", err)
 	}
+
+	go dbManager.PingIdleConnections(sysLog) // Keep the connection pool healthy
 
 	tableChannels, wg := CreateTableWorkers(dbManager, sysLog, apiPlugin)
 
@@ -88,7 +91,7 @@ func CreateTableWorkers(dbManager *database.DBManager, sysLog syslogwrapper.Sysl
 			ch := make(chan []interface{})
 			tableChannels[fmt.Sprintf("%s.%s", dbName, tableName)] = ch
 			wg.Add(1)
-			go TableWorker(dbName, tableName, ch, &wg, sysLog, dbManager.DSN, apiPlugin)
+			go TableWorker(dbName, tableName, ch, &wg, sysLog, dbManager, apiPlugin)
 		}
 	}
 
@@ -138,6 +141,7 @@ func FetchAndDistributeData(apiPlugin api_plugins.APIPlugin, tableChannels map[s
 			batchData = append(batchData, record)
 		}
 	default:
+		sysLog.Warning(fmt.Sprintf("FetchAndDistributeData: Unsupported data type: %T", data))
 		return fmt.Errorf("unsupported data type")
 	}
 
@@ -153,32 +157,49 @@ func FetchAndDistributeData(apiPlugin api_plugins.APIPlugin, tableChannels map[s
 	return nil
 }
 
-func TableWorker(dbName, tableName string, batchChan <-chan []interface{}, wg *sync.WaitGroup, sysLog syslogwrapper.SyslogWrapperInterface, dsn string, apiPlugin api_plugins.APIPlugin) {
+func TableWorker(dbName, tableName string, batchChan <-chan []interface{}, wg *sync.WaitGroup, sysLog syslogwrapper.SyslogWrapperInterface, dbManager *database.DBManager, apiPlugin api_plugins.APIPlugin) {
 	defer wg.Done()
-
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		sysLog.Warning(fmt.Sprintf("Failed to connect to MySQL: %v", err))
-		return
-	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			sysLog.Warning(fmt.Sprintf("Failed to close MySQL connection: %v", err))
-		}
-	}()
 
 	fieldNames := apiPlugin.GetFieldNames()
 	fieldNamesStr := strings.Join(fieldNames, ", ")
 	placeholderStr := strings.Repeat("?, ", len(fieldNames)-1) + "?"
 
+	// Get a connection from the pool
+	db, err := dbManager.DbPool.Conn(context.Background())
+	if err != nil {
+		sysLog.Warning(fmt.Sprintf("Failed to get connection from pool: %v", err))
+		return
+	}
+	defer func(db *sql.Conn) {
+		err := db.Close()
+		if err != nil {
+			sysLog.Warning(fmt.Sprintf("Failed to release DBPool connection: %v", err))
+		}
+	}(db)
+
 	for batch := range batchChan {
+		tx, err := db.BeginTx(context.Background(), &sql.TxOptions{})
+		if err != nil {
+			sysLog.Warning(fmt.Sprintf("Failed to begin transaction: %v", err))
+			continue
+		}
+
 		for _, record := range batch {
 			values := apiPlugin.GetValues(record)
-			query := fmt.Sprintf("INSERT INTO %s.%s (%s) VALUES (%s)", dbName, tableName, fieldNamesStr, placeholderStr)
-			_, err := db.Exec(query, values...)
+			query := fmt.Sprintf("%s %s.%s (%s) VALUES (%s)", "INSERT INTO", dbName, tableName, fieldNamesStr, placeholderStr)
+			_, err := tx.Exec(query, values...)
 			if err != nil {
 				sysLog.Warning(fmt.Sprintf("Failed to insert record into %s.%s: %v", dbName, tableName, err))
+				err := tx.Rollback()
+				if err != nil {
+					sysLog.Warning(fmt.Sprintf("Failed to rollback transaction: %v", err))
+				} // Rollback the current transaction on error
 				continue
+			}
+			// Commit each record change
+			err = tx.Commit()
+			if err != nil {
+				sysLog.Warning(fmt.Sprintf("Failed to commit transaction: %v", err))
 			}
 		}
 	}

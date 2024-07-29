@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/tls"
 	"fmt"
 	"gopkg.in/yaml.v2"
 	"mysql_public_data_ingestor/api_plugins"
@@ -18,12 +19,32 @@ type DBConfig struct {
 }
 
 type MySQLConfig struct {
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	DBName   string `yaml:"dbname"`
-	TLS      string `yaml:"tls"`
+	User           string         `yaml:"user"`
+	Password       string         `yaml:"password"`
+	Host           string         `yaml:"host"`
+	Port           int            `yaml:"port"`
+	DBName         string         `yaml:"dbname"`
+	TLSConfig      TLSConfig      `yaml:"tls_config"`
+	ConnectionPool ConnectionPool `yaml:"connection_pool"`
+}
+
+// TLSConfig holds the TLS configuration options
+type TLSConfig struct {
+	CAFile             string
+	CertFile           string
+	KeyFile            string
+	InsecureSkipVerify bool
+	ServerName         string
+	MinVersion         uint16
+	MaxVersion         uint16
+	CipherSuites       []uint16
+	ClientAuth         tls.ClientAuthType
+}
+
+type ConnectionPool struct {
+	MaxOpenConns    int `yaml:"max_open_conns"`
+	MaxIdleConns    int `yaml:"max_idle_conns"`
+	ConnMaxLifetime int `yaml:"conn_max_lifetime"` // in seconds
 }
 
 type MainConfig struct {

@@ -75,7 +75,12 @@ mysql:
   host: "localhost"
   port: 3306
   dbname: "test_db"
-  tls: "true"
+  tls_config:
+    ca_file: ""
+  connection_pool:
+    max_open_conns: 0 # use default
+    max_idle_conns: 30 # override
+    conn_max_lifetime: 0 # use default
 `
 	if _, err := tempFile.WriteString(configData); err != nil {
 		t.Fatalf("Failed to write to temp file: %v", err)
@@ -105,8 +110,10 @@ mysql:
 	assert.Equal(t, "localhost", config.MySQL.Host, "MySQL host should match")
 	assert.Equal(t, 3306, config.MySQL.Port, "MySQL port should match")
 	assert.Equal(t, "test_db", config.MySQL.DBName, "MySQL DBName should match")
-	assert.Equal(t, "true", config.MySQL.TLS, "MySQL TLS should match")
-
+	assert.Equal(t, "", config.MySQL.TLSConfig.CAFile, "MySQL CAFile should match")
+	assert.Equal(t, 25, config.MySQL.ConnectionPool.MaxOpenConns, "MySQL MaxOpenConns should use default")
+	assert.Equal(t, 30, config.MySQL.ConnectionPool.MaxIdleConns, "MySQL MaxIdleConns should be overridden")
+	assert.Equal(t, 3600, config.MySQL.ConnectionPool.ConnMaxLifetime, "MySQL ConnMaxLifetime should use default")
 }
 
 // TestLoadConfig_FileReadError tests loading configuration from a non-existent file

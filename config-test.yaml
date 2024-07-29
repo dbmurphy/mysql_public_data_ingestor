@@ -21,4 +21,17 @@ mysql:
   host: "localhost"
   port: 3306
   dbname: "testdb"
-  tls: "true"
+  tls_config:
+    ca_file: ""
+    cert_file: ""
+    key_file: ""
+    insecure_skip_verify: false
+    server_name: ""
+    min_version: 0
+    max_version: 0
+    cipher_suites: null
+    client_auth: 0
+  connection_pool:
+    max_open_conns: 0 # use default
+    max_idle_conns: 20 # override
+    conn_max_lifetime: 0 # use default

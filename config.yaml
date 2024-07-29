@@ -21,4 +21,9 @@ mysql:
   host: "localhost"
   port: 3306
   dbname: "your_mysql_dbname"
-  tls: "true"
+  tls_config:
+    ca_file: ""
+  connection_pool:
+    max_open_conns: 30 # override
+    max_idle_conns: 30 # override
+    conn_max_lifetime: 3600 #default

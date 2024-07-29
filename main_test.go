@@ -1,4 +1,4 @@
-package mysql_public_data_ingestor
+package main
 
 import (
 	"encoding/json"
@@ -170,8 +170,16 @@ func TestLoadConfig(t *testing.T) {
 
 	// Set a test config file path
 	configPath := "config-test.yaml"
-	os.Setenv("TEST_CONFIG_FILE", configPath)
-	defer os.Unsetenv("TEST_CONFIG_FILE")
+	err := os.Setenv("TEST_CONFIG_FILE", configPath)
+	if err != nil {
+		t.Logf("Error setting env var TEST_CONFIG_FILE: %v", err)
+	}
+	defer func() {
+		err := os.Unsetenv("TEST_CONFIG_FILE")
+		if err != nil {
+			t.Logf("Error unsetting env var TEST_CONFIG_FILE: %v", err)
+		}
+	}()
 
 	cfg, err := LoadConfig(mockSyslog)
 	if err != nil {
